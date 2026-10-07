@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <Button
+        android:id="@+id/btnSelectFolder"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="📁 Сменить папку с музыкой"
+        android:layout_marginBottom="8dp" />
+
+    <Button
+        android:id="@+id/btnToggleVisualizer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🎨 Скрыть визуализацию"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:id="@+id/tvCurrentTrack"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Ничего не играет"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textAlignment="center"
+        android:layout_marginBottom="4dp" />
+
+    <TextView
+        android:id="@+id/tvCurrentArtist"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Выберите трек"
+        android:textSize="14sp"
+        android:textAlignment="center"
+        android:layout_marginBottom="16dp" />
+
+    <com.example.rgbplayer.RGBVisualizerView
+        android:id="@+id/rgbVisualizer"
+        android:layout_width="match_parent"
+        android:layout_height="120dp"
+        android:layout_marginBottom="16dp"
+        android:visibility="visible" />
+
+    <SeekBar
+        android:id="@+id/seekBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+
+        <TextView
+            android:id="@+id/tvCurrentTime"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="0:00"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/tvTotalTime"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="0:00"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginBottom="8dp">
+
+        <Button
+            android:id="@+id/btnPrev"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="⏮"
+            android:textSize="24sp"
+            android:layout_marginEnd="16dp" />
+
+        <Button
+            android:id="@+id/btnPlayPause"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="▶"
+            android:textSize="24sp"
+            android:layout_marginEnd="16dp" />
+
+        <Button
+            android:id="@+id/btnNext"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="⏭"
+            android:textSize="24sp" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginBottom="16dp">
+
+        <Button
+            android:id="@+id/btnRepeatOne"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Повтор"
+            android:textSize="14sp"
+            android:layout_marginEnd="8dp"
+            android:backgroundTint="#555555" />
+
+        <Button
+            android:id="@+id/btnSequential"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="По порядку"
+            android:textSize="14sp"
+            android:layout_marginEnd="8dp"
+            android:backgroundTint="#555555" />
+
+        <Button
+            android:id="@+id/btnRandom"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Случайно"
+            android:textSize="14sp"
+            android:backgroundTint="#555555" />
+    </LinearLayout>
+
+    <!-- ВОТ ОНА, КНОПКА ПОЛНОЭКРАННОГО РЕЖИМА -->
+    <Button
+        android:id="@+id/btnFullscreen"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="🪩 Полноэкранный RGB"
+        android:layout_marginBottom="16dp" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recyclerView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+</LinearLayout>

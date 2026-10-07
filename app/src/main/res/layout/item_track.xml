@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:padding="12dp"
+    android:layout_marginBottom="4dp"
+    android:background="@drawable/item_track_background"
+    android:gravity="center_vertical">
+
+    <!-- Иконка ноты -->
+    <TextView
+        android:id="@+id/tvMusicIcon"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="🎵"
+        android:textSize="24sp"
+        android:layout_marginEnd="12dp" />
+
+    <!-- Информация о треке -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tvTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Название трека"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:maxLines="2"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/tvArtist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Исполнитель"
+            android:textSize="13sp"
+            android:textColor="#AAAAAA"
+            android:layout_marginTop="2dp" />
+    </LinearLayout>
+
+</LinearLayout>
