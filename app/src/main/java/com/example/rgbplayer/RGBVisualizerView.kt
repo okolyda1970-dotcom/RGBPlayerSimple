@@ -75,19 +75,19 @@ class RGBVisualizerView @JvmOverloads constructor(
 
             var avgMagnitude = if (count > 0) sum / count else 0f
 
-            // УСИЛЕНИЕ ВЫСОКИХ ЧАСТОТ (увеличили с 1.5 до 2.0)
+            // УСИЛЕНИЕ ВЫСОКИХ ЧАСТОТ
             val frequencyBoost = 1.0 + (i.toDouble() / barCount) * 2.0
             avgMagnitude = (avgMagnitude * frequencyBoost).toFloat()
 
-            // АГРЕССИВНОЕ логарифмическое масштабирование (уменьшили делитель с 1.8 до 1.2)
+            // Логарифмическое масштабирование
             val logMagnitude = if (avgMagnitude > 1f) log10(avgMagnitude.toDouble()) else 0.0
             val normalized = (logMagnitude / 1.2).coerceIn(0.0, 1.0).toFloat()
 
-            // Сглаживание (чуть быстрее реакция)
+            // Сглаживание
             smoothedBars[i] = smoothedBars[i] * 0.6f + normalized * 0.4f
 
-            // УВЕЛИЧЕННАЯ высота (умножаем на 1.5 вместо 1.2)
-            val barHeight = max(smoothedBars[i] * height * 1.5f, 3f)
+            // Высота
+            val barHeight = max(smoothedBars[i] * height * 0.8f, 3f)
             val x = startX + i * totalBarWidth
             val y = height - barHeight
 
@@ -100,5 +100,13 @@ class RGBVisualizerView @JvmOverloads constructor(
             val radius = barWidth / 2f
             canvas.drawRoundRect(rect, radius, radius, paint)
         }
+    }
+
+    // ✅ ДОБАВЛЕННЫЙ МЕТОД (именно его не хватало для компиляции)
+    fun clearBars() {
+        for (i in smoothedBars.indices) {
+            smoothedBars[i] = 0f
+        }
+        invalidate()
     }
 }

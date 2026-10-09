@@ -24,13 +24,15 @@ import androidx.core.content.edit
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.MediaSession
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import com.example.rgbplayer.adapter.TrackAdapter
 import java.util.Locale
+import com.example.rgbplayer.adapter.TrackAdapter
 
 class MainActivity : AppCompatActivity() {
 
@@ -38,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var adapter: TrackAdapter
     private val tracks = mutableListOf<Track>()
     private lateinit var player: ExoPlayer
+    private var mediaSession: MediaSession? = null
 
     private lateinit var tvCurrentTrack: TextView
     private lateinit var tvCurrentArtist: TextView
@@ -49,7 +52,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnNext: Button
     private lateinit var btnSelectFolder: Button
     private lateinit var btnToggleVisualizer: Button
-    private lateinit var btnFullscreen: Button // <-- ОБЪЯВЛЕНИЕ КНОПКИ
+    private lateinit var btnFullscreen: Button
     private lateinit var rgbVisualizer: RGBVisualizerView
 
     private lateinit var btnRepeatOne: Button
@@ -97,7 +100,7 @@ class MainActivity : AppCompatActivity() {
         btnNext = findViewById(R.id.btnNext)
         btnSelectFolder = findViewById(R.id.btnSelectFolder)
         btnToggleVisualizer = findViewById(R.id.btnToggleVisualizer)
-        btnFullscreen = findViewById(R.id.btnFullscreen) // <-- ИНИЦИАЛИЗАЦИЯ КНОПКИ
+        btnFullscreen = findViewById(R.id.btnFullscreen)
         rgbVisualizer = findViewById(R.id.rgbVisualizer)
 
         btnRepeatOne = findViewById(R.id.btnRepeatOne)
@@ -105,23 +108,19 @@ class MainActivity : AppCompatActivity() {
         btnRandom = findViewById(R.id.btnRandom)
 
         player = ExoPlayer.Builder(this).build()
+        mediaSession = MediaSession.Builder(this, player).build()
         setupPlayerListener()
 
         recyclerView = findViewById(R.id.recyclerView)
         recyclerView.layoutManager = LinearLayoutManager(this)
 
-        // ЯВНАЯ передача всех трёх параметров по порядку
-        adapter = TrackAdapter(
-            tracks,
-            { clickedTrack ->
-                val index = tracks.indexOf(clickedTrack)
-                if (index >= 0) {
-                    currentTrackIndex = index
-                    playCurrentTrack()
-                }
-            },
-            -1 // Начальный индекс (ни один трек не выбран)
-        )
+        adapter = TrackAdapter(tracks, { clickedTrack ->
+            val index = tracks.indexOf(clickedTrack)
+            if (index >= 0) {
+                currentTrackIndex = index
+                playCurrentTrack()
+            }
+        }, -1)
 
         recyclerView.adapter = adapter
 
@@ -129,42 +128,34 @@ class MainActivity : AppCompatActivity() {
             if (player.isPlaying) {
                 player.pause()
             } else {
-                // Если список треков пуст — ничего не делаем
                 if (tracks.isEmpty()) {
                     Toast.makeText(this, "Сначала выберите папку с музыкой", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
                 }
-
-                // Если трек не выбран — начинаем с первого
                 if (currentTrackIndex < 0 || currentTrackIndex >= tracks.size) {
                     currentTrackIndex = 0
                 }
-
-                // Если плеер ещё ничего не загружал — запускаем первый трек
                 if (player.currentMediaItem == null) {
                     playCurrentTrack()
                 } else {
-                    // Иначе просто возобновляем воспроизведение
                     player.play()
+                    updateCurrentTrackUI()
                 }
+
+                // Создаём визуализатор ПОСЛЕ нажатия Play с задержкой
+                handler.postDelayed({
+                    setupVisualizer()
+                }, 1000)  // 1 секунда задержки
             }
         }
 
         btnPrev.setOnClickListener {
-            if (currentTrackIndex > 0) {
-                currentTrackIndex--
-                playCurrentTrack()
-            }
+            player.seekToPreviousMediaItem()
         }
 
         btnNext.setOnClickListener {
             when (playMode) {
-                0 -> {
-                    if (currentTrackIndex < tracks.size - 1) {
-                        currentTrackIndex++
-                        playCurrentTrack()
-                    }
-                }
+                0 -> player.seekToNextMediaItem()
                 1 -> {
                     player.seekTo(0)
                     player.play()
@@ -212,14 +203,12 @@ class MainActivity : AppCompatActivity() {
             updateModeButtons()
         }
 
-        // <-- ОБРАБОТЧИК КНОПКИ ПОЛНОЭКРАННОГО РЕЖИМА
         btnFullscreen.setOnClickListener {
             if (tracks.isNotEmpty()) {
                 if (!player.isPlaying && player.currentMediaItem == null) {
                     playCurrentTrack()
                 }
                 currentAudioSessionId = player.audioSessionId
-
                 val intent = Intent(this, RgbFullscreenActivity::class.java)
                 intent.putExtra("AUDIO_SESSION_ID", currentAudioSessionId)
                 startActivity(intent)
@@ -287,35 +276,36 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupVisualizer() {
         try {
-            // Если уже есть активный визуализатор, не создаём новый
             if (visualizer != null) return
 
             val audioSessionId = player.audioSessionId
-            if (audioSessionId != 0) {
-                visualizer = Visualizer(audioSessionId).apply {
-                    captureSize = Visualizer.getCaptureSizeRange()[1]
-                    setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
-                        override fun onWaveFormDataCapture(
-                            visualizer: Visualizer?,
-                            waveform: ByteArray?,
-                            samplingRate: Int
-                        ) {}
+            android.util.Log.d("Visualizer", "Session ID: $audioSessionId")
 
-                        override fun onFftDataCapture(
-                            visualizer: Visualizer?,
-                            fft: ByteArray?,
-                            samplingRate: Int
-                        ) {
-                            fft?.let {
-                                rgbVisualizer.updateFFT(it)
-                            }
+            if (audioSessionId != 0) {
+                visualizer = Visualizer(audioSessionId)
+
+                // Минимальные настройки
+                visualizer?.setCaptureSize(128)
+
+                visualizer?.setDataCaptureListener(
+                    object : Visualizer.OnDataCaptureListener {
+                        override fun onWaveFormDataCapture(visualizer: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
+
+                        override fun onFftDataCapture(visualizer: Visualizer?, fft: ByteArray?, samplingRate: Int) {
+                            android.util.Log.d("Visualizer", "FFT: ${fft?.size} bytes")
+                            fft?.let { rgbVisualizer.updateFFT(it) }
                         }
-                    }, Visualizer.getMaxCaptureRate() / 2, false, true)
-                    enabled = true
-                }
+                    },
+                    5000,  // Медленная частота обновления (5 Гц)
+                    false,
+                    true
+                )
+
+                visualizer?.enabled = true
+                android.util.Log.d("Visualizer", "Enabled: ${visualizer?.enabled}")
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("Visualizer", "Error: ${e.message}", e)
         }
     }
 
@@ -347,24 +337,44 @@ class MainActivity : AppCompatActivity() {
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 btnPlayPause.text = if (isPlaying) "⏸" else "▶"
+                if (isPlaying) {
+                    startSeekBarUpdate()
+                } else {
+                    handler.removeCallbacksAndMessages(null)
+                    // Сбрасываем визуализатор при паузе
+                    rgbVisualizer.clearBars()
+                }
+            }
+
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                super.onMediaItemTransition(mediaItem, reason)
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO ||
+                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK) {
+                    currentTrackIndex = player.currentMediaItemIndex
+                    updateCurrentTrackUI()
+                    handler.postDelayed({
+                        if (!isFullscreenActive) {
+                            visualizer?.release()
+                            visualizer = null
+                            setupVisualizer()
+                        }
+                    }, 500)
+                }
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
                     when (playMode) {
-                        0 -> {
-                            if (currentTrackIndex < tracks.size - 1) {
-                                currentTrackIndex++
-                                playCurrentTrack()
-                            }
+                        0 -> player.seekToNextMediaItem()
+                        1 -> {
+                            player.seekTo(0)
+                            player.play()
                         }
-                        1 -> { playCurrentTrack() }
                         2 -> {
                             if (tracks.size > 1) {
-                                var newIndex = random.nextInt(tracks.size)
-                                while (newIndex == currentTrackIndex) { newIndex = random.nextInt(tracks.size) }
-                                currentTrackIndex = newIndex
-                                playCurrentTrack()
+                                val randomIndex = random.nextInt(tracks.size)
+                                player.seekTo(randomIndex, 0)
+                                player.play()
                             }
                         }
                     }
@@ -373,7 +383,15 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-
+    private fun updateCurrentTrackUI() {
+        if (currentTrackIndex in tracks.indices) {
+            val track = tracks[currentTrackIndex]
+            tvCurrentTrack.text = track.title
+            tvCurrentArtist.text = track.artist
+            adapter.setCurrentTrackIndex(currentTrackIndex)
+            startSeekBarUpdate()
+        }
+    }
 
     private fun startSeekBarUpdate() {
         handler.removeCallbacksAndMessages(null)
@@ -425,6 +443,21 @@ class MainActivity : AppCompatActivity() {
         } else {
             Toast.makeText(this, "Найдено треков: ${tracks.size}", Toast.LENGTH_SHORT).show()
         }
+
+        // Загружаем ВЕСЬ плейлист в ExoPlayer для корректной работы кнопок Next/Prev
+        val mediaItems = tracks.map { track ->
+            MediaItem.Builder()
+                .setUri(track.uri)
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(track.title)
+                        .setArtist(track.artist)
+                        .build()
+                )
+                .build()
+        }
+        player.setMediaItems(mediaItems)
+        player.prepare()
     }
 
     private fun formatTime(ms: Long): String {
@@ -438,75 +471,49 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         handler.removeCallbacksAndMessages(null)
         visualizer?.release()
+        mediaSession?.release()
         player.release()
     }
 
     override fun onPause() {
         super.onPause()
-        // Освобождаем визуализатор при уходе с экрана
-        try {
-            visualizer?.release()
-            visualizer = null
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        isFullscreenActive = true
+        // НЕ освобождаем визуализатор при паузе!
     }
 
     override fun onResume() {
         super.onResume()
         isFullscreenActive = false
 
-        // Восстанавливаем визуализатор при возврате с задержкой
-        // Плееру нужно время, чтобы возобновить воспроизведение
-        handler.removeCallbacksAndMessages(null)
-        handler.postDelayed({
-            if (player.isPlaying) {
-                try {
-                    visualizer?.release()
-                    visualizer = null
-                    setupVisualizer()
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                    // Пробуем ещё раз через 1 секунду
-                    handler.postDelayed({
-                        if (player.isPlaying) {
-                            try {
-                                setupVisualizer()
-                            } catch (e2: Exception) {
-                                e2.printStackTrace()
-                            }
-                        }
-                    }, 1000)
-                }
-            }
-        }, 800)
+        // Просто запускаем обновление ползунка, визуализатор не трогаем
+        if (player.isPlaying) {
+            startSeekBarUpdate()
+        }
     }
 
     private fun playCurrentTrack() {
         if (tracks.isEmpty()) return
-
-        val track = tracks[currentTrackIndex]
-        val mediaItem = MediaItem.fromUri(track.uri)
-        player.setMediaItem(mediaItem)
-        player.prepare()
+        player.seekTo(currentTrackIndex, 0)
         player.play()
+        updateCurrentTrackUI()
 
-        tvCurrentTrack.text = track.title
-        tvCurrentArtist.text = track.artist
-        startSeekBarUpdate()
+        // Создаём визуализатор с задержкой, чтобы плеер точно начал играть
 
-        adapter.setCurrentTrackIndex(currentTrackIndex)
+    }
 
-        // Пересоздаём визуализатор при смене трека
+    private fun setupVisualizerWithRetry(attempt: Int) {
+        if (attempt > 10) return // Максимум 10 попыток
+
         handler.postDelayed({
-            try {
+            if (player.audioSessionId != 0) {
+                // Аудио сессия готова — создаём визуализатор
                 visualizer?.release()
                 visualizer = null
                 setupVisualizer()
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } else {
+                // Ещё не готова — пробуем через 200мс
+                setupVisualizerWithRetry(attempt + 1)
             }
-        }, 500)
+        }, 200)
     }
 }
-
