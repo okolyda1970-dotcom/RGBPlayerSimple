@@ -69,6 +69,8 @@ class MainActivity : AppCompatActivity() {
     private val random = java.util.Random()
     private var isVisualizerVisible = true
     private var isFullscreenActive = false
+    private lateinit var btnVisualMode: Button
+    private var visualMode = 0 // 0 = полоски, 1 = лампы
 
     companion object {
         private const val PERMISSION_REQUEST_CODE = 100
@@ -113,6 +115,15 @@ class MainActivity : AppCompatActivity() {
 
         recyclerView = findViewById(R.id.recyclerView)
         recyclerView.layoutManager = LinearLayoutManager(this)
+        btnVisualMode = findViewById(R.id.btnVisualMode)
+        visualMode = prefs.getInt("visual_mode", 0)
+        updateVisualMode()
+
+        btnVisualMode.setOnClickListener {
+            visualMode = (visualMode + 1) % 2
+            prefs.edit().putInt("visual_mode", visualMode).apply()
+            updateVisualMode()
+        }
 
         adapter = TrackAdapter(tracks, { clickedTrack ->
             val index = tracks.indexOf(clickedTrack)
@@ -515,5 +526,17 @@ class MainActivity : AppCompatActivity() {
                 setupVisualizerWithRetry(attempt + 1)
             }
         }, 200)
+    }
+    private fun updateVisualMode() {
+        when (visualMode) {
+            0 -> {
+                rgbVisualizer.mode = RGBVisualizerView.Mode.BARS
+                btnVisualMode.text = " Режим: Полоски"
+            }
+            1 -> {
+                rgbVisualizer.mode = RGBVisualizerView.Mode.LAMPS
+                btnVisualMode.text = "💡 Режим: RGB лампы"
+            }
+        }
     }
 }

@@ -19,6 +19,16 @@
         android:text="🎨 Скрыть визуализацию"
         android:layout_marginBottom="8dp" />
 
+    <Button
+        android:id="@+id/btnVisualMode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_margin="16dp"
+        android:backgroundTint="#6B4C9A"
+        android:text="🔵 Режим: Полоски"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"/>
+
     <TextView
         android:id="@+id/tvCurrentTrack"
         android:layout_width="match_parent"
