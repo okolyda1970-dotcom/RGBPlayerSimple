@@ -88,6 +88,17 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 1. ЗАПРОС РАЗРЕШЕНИЯ НА МИКРОФОН (обязательно для Visualizer)
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.RECORD_AUDIO),
+                1001 // Код запроса
+            )
+        }
+
         setContentView(R.layout.activity_main)
 
         prefs = getSharedPreferences("RGBPlayerPrefs", MODE_PRIVATE)
@@ -137,8 +148,12 @@ class MainActivity : AppCompatActivity() {
 
         btnPlayPause.setOnClickListener {
             if (player.isPlaying) {
+                // === ПАУЗА ===
                 player.pause()
+                visualizer?.enabled = false
+                android.util.Log.d("VisualizerDebug", "⏸️ Пауза. Visualizer выключен.")
             } else {
+                // === PLAY ===
                 if (tracks.isEmpty()) {
                     Toast.makeText(this, "Сначала выберите папку с музыкой", Toast.LENGTH_SHORT).show()
                     return@setOnClickListener
@@ -146,17 +161,22 @@ class MainActivity : AppCompatActivity() {
                 if (currentTrackIndex < 0 || currentTrackIndex >= tracks.size) {
                     currentTrackIndex = 0
                 }
+
                 if (player.currentMediaItem == null) {
-                    playCurrentTrack()
+                    playCurrentTrack() // Внутри этой функции должен быть player.play()
                 } else {
                     player.play()
                     updateCurrentTrackUI()
                 }
 
-                // Создаём визуализатор ПОСЛЕ нажатия Play с задержкой
-                handler.postDelayed({
-                    setupVisualizer()
-                }, 1000)  // 1 секунда задержки
+                // 🎯 МАГИЯ ЗДЕСЬ:
+                // 1. Сначала убеждаемся, что визуализатор привязан к текущей (уже активной!) сессии
+                setupVisualizer()
+                // 2. Принудительно включаем его, теперь, когда музыка ТОЧНО играет
+                visualizer?.enabled = true
+
+                val actualState = visualizer?.enabled
+                android.util.Log.d("VisualizerDebug", "▶️ Play нажат. Попытка включения. Реальный статус enabled: $actualState")
             }
         }
 
@@ -286,37 +306,51 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupVisualizer() {
+        val sessionId = player.audioSessionId
+        android.util.Log.d("VisualizerDebug", "Попытка настройки. Session ID: $sessionId")
+
+        if (sessionId == 0) {
+            android.util.Log.e("VisualizerDebug", "ОШИБКА: Session ID = 0. Плеер ещё не инициализировал аудио.")
+            return
+        }
+
+        // Освобождаем старый, если был, чтобы не было конфликтов
+        visualizer?.release()
+        visualizer = null
+
+        // ПРОВЕРКА РАЗРЕШЕНИЯ ПРЯМО ЗДЕСЬ
+        val hasPermission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        android.util.Log.d("VisualizerDebug", "Разрешение на микрофон есть? -> $hasPermission")
+
+        if (!hasPermission) {
+            android.util.Log.e("VisualizerDebug", "КРИТИЧЕСКАЯ ОШИБКА: Нет разрешения RECORD_AUDIO! Визуализатор НЕ БУДЕТ работать.")
+            // Принудительно запрашиваем снова
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 1001)
+            return
+        }
+
         try {
-            if (visualizer != null) return
+            visualizer = android.media.audiofx.Visualizer(sessionId)
+            visualizer?.setCaptureSize(1024)
 
-            val audioSessionId = player.audioSessionId
-            android.util.Log.d("Visualizer", "Session ID: $audioSessionId")
+            visualizer?.setDataCaptureListener(
+                object : android.media.audiofx.Visualizer.OnDataCaptureListener {
+                    override fun onWaveFormDataCapture(v: android.media.audiofx.Visualizer?, w: ByteArray?, s: Int) {}
 
-            if (audioSessionId != 0) {
-                visualizer = Visualizer(audioSessionId)
+                    override fun onFftDataCapture(v: android.media.audiofx.Visualizer?, fft: ByteArray?, s: Int) {
+                        android.util.Log.d("VisualizerDebug", "🔥 CALLBACK FIRED! Size: ${fft?.size}")
+                        fft?.let { data -> rgbVisualizer.updateFFT(data) }
+                    }
+                },
+                android.media.audiofx.Visualizer.getMaxCaptureRate() / 2,
+                false,
+                true
+            )
 
-                // Минимальные настройки
-                visualizer?.setCaptureSize(128)
+            android.util.Log.d("VisualizerDebug", "Visualizer успешно создан и настроен.")
 
-                visualizer?.setDataCaptureListener(
-                    object : Visualizer.OnDataCaptureListener {
-                        override fun onWaveFormDataCapture(visualizer: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
-
-                        override fun onFftDataCapture(visualizer: Visualizer?, fft: ByteArray?, samplingRate: Int) {
-                            android.util.Log.d("Visualizer", "FFT: ${fft?.size} bytes")
-                            fft?.let { rgbVisualizer.updateFFT(it) }
-                        }
-                    },
-                    5000,  // Медленная частота обновления (5 Гц)
-                    false,
-                    true
-                )
-
-                visualizer?.enabled = true
-                android.util.Log.d("Visualizer", "Enabled: ${visualizer?.enabled}")
-            }
         } catch (e: Exception) {
-            android.util.Log.e("Visualizer", "Error: ${e.message}", e)
+            android.util.Log.e("VisualizerDebug", "Исключение при создании: ${e.message}", e)
         }
     }
 
@@ -506,6 +540,9 @@ class MainActivity : AppCompatActivity() {
         if (tracks.isEmpty()) return
         player.seekTo(currentTrackIndex, 0)
         player.play()
+        visualizer?.enabled = true
+        android.util.Log.d("Visualizer", "▶️ Visualizer включен при запуске нового трека")
+
         updateCurrentTrackUI()
 
         // Создаём визуализатор с задержкой, чтобы плеер точно начал играть

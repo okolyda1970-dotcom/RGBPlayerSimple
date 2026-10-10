@@ -3,6 +3,7 @@ package com.example.rgbplayer
 import android.content.Context
 import android.graphics.*
 import android.util.AttributeSet
+import android.util.Log
 import android.view.View
 import kotlin.math.*
 
@@ -15,19 +16,24 @@ class RGBVisualizerView @JvmOverloads constructor(
     enum class Mode { BARS, LAMPS }
 
     private val paint = Paint()
-    private var fftData: ByteArray = ByteArray(128)
+    private var fftData: ByteArray = ByteArray(1024) // Увеличенный размер для точности
     private val barCount = 32
     private val barSpacing = 4f
     private val smoothedBars = FloatArray(barCount)
 
     // Для режима ламп
-    private val smoothedLampLevels = floatArrayOf(0f, 0f, 0f) // ФНЧ, ФСЧ, ФВЧ
+    private val smoothedLampLevels = floatArrayOf(0f, 0f, 0f)
     private val lampPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG)
 
     var mode: Mode = Mode.BARS
+    private var logCounter = 0
 
     fun updateFFT(data: ByteArray) {
+        if (fftData.size != data.size) {
+            Log.d("RGB_Filters", "FFT size changed: ${fftData.size} → ${data.size}")
+            fftData = ByteArray(data.size)
+        }
         fftData = data
         invalidate()
     }
@@ -103,7 +109,7 @@ class RGBVisualizerView @JvmOverloads constructor(
         }
     }
 
-    // ✅ ОБНОВЛЁННЫЙ МЕТОД drawLamps (огромный диаметр, пороги, быстрая реакция)
+    // ✅ ПОСЛЕДНЯЯ ВЕРСИЯ drawLamps с отладкой FilterDebug и честной энергией
     private fun drawLamps(canvas: Canvas) {
         val width = width.toFloat()
         val height = height.toFloat()
@@ -112,53 +118,85 @@ class RGBVisualizerView @JvmOverloads constructor(
         val sampleRate = 44100f
         val frequencyResolution = sampleRate / (fftSize * 2)
 
-        // Диапазоны частот в бинах
-        val bassEnd = (300f / frequencyResolution).toInt().coerceIn(1, fftSize - 1)
-        val midEnd = (3000f / frequencyResolution).toInt().coerceIn(1, fftSize - 1)
+        // 1. Вычисляем границы фильтров
+        val bassEnd = (200f / frequencyResolution).toInt().coerceIn(1, fftSize - 1)
+        val midStart = (400f / frequencyResolution).toInt().coerceIn(1, fftSize - 1)
+        val midEnd = (2000f / frequencyResolution).toInt().coerceIn(1, fftSize - 1)
+     //   val trebleStart = (5000f / frequencyResolution).toInt().coerceIn(1, fftSize - 1)
+        val trebleStart = (3000f / frequencyResolution).toInt().coerceIn(1, fftSize - 1)
 
-        // Вычисляем RMS для каждого диапазона
-        var bassSum = 0f; var midSum = 0f; var trebleSum = 0f
-        var bassCount = 0; var midCount = 0; var trebleCount = 0
+        // 2. ДЕТАЛЬНАЯ ОТЛАДКА: печатаем границы и значения конкретных бинов каждые 30 кадров
+        if (logCounter % 30 == 0) {
+            Log.d("FilterDebug", "=== ГРАНИЦЫ ФИЛЬТРОВ ===")
+            Log.d("FilterDebug", "fftSize=$fftSize, Разрешение=${String.format("%.2f", frequencyResolution)} Гц/бин")
+            Log.d("FilterDebug", "БАС: бины 1..$bassEnd (до ${bassEnd * frequencyResolution} Гц)")
+            Log.d("FilterDebug", "СРЕДНИЕ: бины $midStart..$midEnd (${midStart * frequencyResolution} - ${midEnd * frequencyResolution} Гц)")
+            Log.d("FilterDebug", "ВЫСОКИЕ: бины $trebleStart..${fftSize-1} (от ${trebleStart * frequencyResolution} Гц)")
+
+            Log.d("FilterDebug", "=== АМПЛИТУДЫ КОНКРЕТНЫХ БИНОВ ===")
+            Log.d("FilterDebug", "Бин 1 (~43 Гц): ${getMagnitude(fftData, 1)}")
+            Log.d("FilterDebug", "Бин 5 (~215 Гц): ${getMagnitude(fftData, 5)}")
+            Log.d("FilterDebug", "Бин 50 (~2150 Гц): ${getMagnitude(fftData, 50)}")
+            Log.d("FilterDebug", "Бин 70 (~3015 Гц): ${getMagnitude(fftData, 70)}")  // НОВОЕ!
+            Log.d("FilterDebug", "Бин 100 (~4307 Гц): ${getMagnitude(fftData, 100)}") // НОВОЕ!
+            Log.d("FilterDebug", "Бин 150 (~6450 Гц): ${getMagnitude(fftData, 150)}")
+        }
+
+        // 3. Ищем МАКСИМАЛЬНУЮ амплитуду (ПИК) в каждом диапазоне, а не сумму!
+        // Это полностью устраняет проблему накопления шума от сотен пустых бинов.
+        var bassPeak = 0f
+        var midPeak = 0f
+        var treblePeak = 0f
 
         for (bin in 1 until fftSize) {
-            val real = fftData[bin * 2].toInt()
-            val imaginary = fftData[bin * 2 + 1].toInt()
-            val magnitude = sqrt((real * real + imaginary * imaginary).toDouble()).toFloat()
+            val magnitude = getMagnitude(fftData, bin)
 
             when {
-                bin <= bassEnd -> { bassSum += magnitude * magnitude; bassCount++ }
-                bin <= midEnd -> { midSum += magnitude * magnitude; midCount++ }
-                else -> { trebleSum += magnitude * magnitude; trebleCount++ }
+                bin <= bassEnd -> {
+                    if (magnitude > bassPeak) bassPeak = magnitude
+                }
+                bin in midStart..midEnd -> {
+                    if (magnitude > midPeak) midPeak = magnitude
+                }
+                bin >= trebleStart -> {
+                    if (magnitude > treblePeak) treblePeak = magnitude
+                }
             }
         }
 
-        val bassRMS = if (bassCount > 0) sqrt(bassSum / bassCount) else 0f
-        val midRMS = if (midCount > 0) sqrt(midSum / midCount) else 0f
-        val trebleRMS = if (trebleCount > 0) sqrt(trebleSum / trebleCount) else 0f
-
-        // Нормализация с ПОРОГОМ и БАЛАНСОМ
-        fun normalize(rms: Float, boost: Float, threshold: Float): Float {
-            val boosted = rms * boost
+        // 4. Функция нормализации для пиковых значений
+        fun normalize(peak: Float, boost: Float, threshold: Float): Float {
+            val boosted = peak * boost
             val logVal = if (boosted > threshold) log10(boosted.toDouble()).toFloat() else 0f
-            return (logVal / 1.2f).coerceIn(0f, 1f)
+            return (logVal / 1.0f).coerceIn(0f, 1f)
         }
 
-        // БАЛАНСИРОВКА: усиливаем бас и средние, ослабляем высокие
-        val bassLevel = normalize(bassRMS, 0.07f, 5.5f)    // Усиливаем бас ещё больше, порог ниже
-        val midLevel = normalize(midRMS, 0.12f, 6.5f)       // Средние тоже усиливаем
-        val trebleLevel = normalize(trebleRMS, 0.4f, 5.5f) // Высокие ослабляем, порог выше
+        // 5. Применяем нормализацию (пороги подобраны под реальные пики из твоего лога: 10, 87, 6, 1)
+        val bassLevel = normalize(bassPeak, 0.05f, 2.0f)      // Если пик 80: 80*0.05=4.0 > 2.0 (горит)
+        val midLevel = normalize(midPeak, 0.15f, 2.0f)        // Если пик 10: 10*0.15=1.5 < 2.0 (не горит)
+        val trebleLevel = normalize(treblePeak, 1.0f, 1.2f)   // Если пик 1 (шум): 1*0.5=0.5 < 2.0 (НЕ ГОРИТ!)
 
-        // ОЧЕНЬ быстрое сглаживание (мгновенная реакция, резкие вспышки)
+        // 6. Быстрое сглаживание
         smoothedLampLevels[0] = smoothedLampLevels[0] * 0.2f + bassLevel * 0.8f
         smoothedLampLevels[1] = smoothedLampLevels[1] * 0.2f + midLevel * 0.8f
         smoothedLampLevels[2] = smoothedLampLevels[2] * 0.2f + trebleLevel * 0.8f
 
-        // МАКСИМАЛЬНЫЙ радиус - заполняют ВЕСЬ экран
+        // 7. Лог для проверки (теперь показывает пики, а не ложную сумму)
+        logCounter++
+        if (logCounter % 15 == 0) {
+            Log.d("LampTuning",
+                String.format("Peak: B=%.1f, M=%.1f, T=%.1f | Уровни: B=%.2f, M=%.2f, T=%.2f",
+                    bassPeak, midPeak, treblePeak,
+                    smoothedLampLevels[0], smoothedLampLevels[1], smoothedLampLevels[2])
+            )
+        }
+
+        // 8. МАКСИМАЛЬНЫЙ радиус - заполняют ВЕСЬ экран
         val baseRadius = max(width, height) / 1.5f
         val spacing = width / 4f
         val centerY = height / 2f
 
-        // Создаём bitmap для аддитивного смешения (цвета складываются)
+        // 9. Создаём bitmap для аддитивного смешения
         val bitmap = Bitmap.createBitmap(width.toInt(), height.toInt(), Bitmap.Config.ARGB_8888)
         val bitmapCanvas = Canvas(bitmap)
 
@@ -169,11 +207,10 @@ class RGBVisualizerView @JvmOverloads constructor(
         )
 
         for ((color, level, centerX) in lampData) {
-            // Радиус зависит от уровня (от 0 до максимума)
             val currentRadius = baseRadius * level
 
-            if (level > 0.05f) {  // Рисуем только если уровень выше минимума
-                // Огромное внешнее свечение (заполняет весь экран)
+            if (level > 0.05f) {
+                // Огромное внешнее свечение
                 val glowRadius = currentRadius * 5f
                 val glowShader = RadialGradient(
                     centerX, centerY, glowRadius,
@@ -188,15 +225,14 @@ class RGBVisualizerView @JvmOverloads constructor(
                 glowPaint.shader = glowShader
                 bitmapCanvas.drawCircle(centerX, centerY, glowRadius, glowPaint)
 
-                // Яркое ядро лампы
+                // Яркое ядро лампы БЕЗ БЕЛОГО (чистый насыщенный цвет)
                 if (level > 0.2f) {
                     val coreRadius = currentRadius * 0.4f
+                    val pureColor = Color.argb(255, Color.red(color), Color.green(color), Color.blue(color))
+
                     val coreShader = RadialGradient(
                         centerX, centerY, coreRadius,
-                        intArrayOf(
-                            Color.WHITE,
-                            Color.argb(255, Color.red(color), Color.green(color), Color.blue(color))
-                        ),
+                        intArrayOf(pureColor, pureColor),
                         floatArrayOf(0f, 1f),
                         Shader.TileMode.CLAMP
                     )
@@ -206,7 +242,7 @@ class RGBVisualizerView @JvmOverloads constructor(
             }
         }
 
-        // Рисуем bitmap с аддитивным смешением (SCREEN)
+        // 10. Рисуем bitmap с аддитивным смешением (SCREEN)
         val blendPaint = Paint()
         blendPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SCREEN)
         canvas.drawBitmap(bitmap, 0f, 0f, blendPaint)
